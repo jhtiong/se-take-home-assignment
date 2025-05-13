@@ -18,6 +18,9 @@
           <div v-for="order in pendingOrders" :key="order.id" class="order-card" :class="{ 'vip': order.isVIP }">
             <span>Order #{{ order.id }}</span>
             <span class="order-type">{{ order.isVIP ? 'VIP' : 'Normal' }}</span>
+            <span v-if="processingOrders.has(order.id)" class="countdown">
+              Processing: {{ processingTimes.get(order.id) }}s
+            </span>
           </div>
         </div>
       </div>
@@ -38,13 +41,14 @@
 <script>
 export default {
   name: 'OrderSystem',
-  data() {
-    return {
+  data() {    return {
       nextOrderId: 1,
       pendingOrders: [],
       completedOrders: [],
       bots: [],
-      processingOrders: new Set()
+      processingOrders: new Set(),
+      processingOrdersTimers: new Map(), // Store countdown timers
+      processingTimes: new Map() // Store remaining time for each order
     }
   },
   methods: {
@@ -93,13 +97,26 @@ export default {
         // If bot was processing an order, return it to pending
         this.checkProcessingOrders();
       }
-    },
-    async processOrder(bot, order) {
+    },    async processOrder(bot, order) {
       bot.isBusy = true;
       this.processingOrders.add(order.id);
       
+      // Initialize processing time (10 seconds)
+      const totalTime = 10;
+      this.processingTimes.set(order.id, totalTime);
+      
+      // Set up countdown timer
+      const timer = setInterval(() => {
+        const currentTime = this.processingTimes.get(order.id);
+        if (currentTime > 0) {
+          this.processingTimes.set(order.id, currentTime - 1);
+        }
+      }, 1000);
+      
+      this.processingOrdersTimers.set(order.id, timer);
+      
       try {
-        await new Promise(resolve => setTimeout(resolve, 10000));
+        await new Promise(resolve => setTimeout(resolve, totalTime * 1000));
         
         if (this.bots.includes(bot)) { // Check if bot still exists
           this.completedOrders.push(order);
@@ -110,7 +127,12 @@ export default {
           this.pendingOrders.push(order);
         }
       } finally {
+        // Clean up timer
+        clearInterval(this.processingOrdersTimers.get(order.id));
+        this.processingOrdersTimers.delete(order.id);
+        this.processingTimes.delete(order.id);
         this.processingOrders.delete(order.id);
+        
         if (this.bots.includes(bot)) {
           bot.isBusy = false;
           this.checkAndProcessOrders();
@@ -218,6 +240,14 @@ button:hover {
 .order-card.vip .order-type {
   background-color: #ffd700;
   color: #000;
+}
+
+.countdown {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  background-color: #e2e3e5;
+  color: #383d41;
 }
 
 h2 {
