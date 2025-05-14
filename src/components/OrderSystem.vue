@@ -3,6 +3,7 @@
   <div class="order-system">
     <div class="controls">
       <button @click="createNormalOrder">New Normal Order</button>
+      <button @click="createFastOrder">New Fast Order</button>
       <button @click="createVIPOrder">New VIP Order</button>
       <div class="bot-controls">
         <button @click="addBot">+ Bot</button>
@@ -55,7 +56,17 @@ export default {
     createNormalOrder() {
       this.pendingOrders.push({
         id: this.nextOrderId++,
-        isVIP: false
+        isVIP: false,
+        processTime: 10 
+      });
+      this.checkAndProcessOrders();
+    },
+
+    createFastOrder() {
+      this.pendingOrders.push({
+        id: this.nextOrderId++,
+        isVIP: false,
+        processTime: 5
       });
       this.checkAndProcessOrders();
     },
@@ -134,8 +145,7 @@ export default {
       this.processingOrders.add(order.id);
       
       // Initialize processing time (10 seconds)
-      const totalTime = 10;
-      this.processingTimes.set(order.id, totalTime);
+      this.processingTimes.set(order.id, order.processTime);
       
       // Set up countdown timer
       const timer = setInterval(() => {
@@ -155,7 +165,7 @@ export default {
       
       this.processingOrdersTimers.set(order.id, timer);
         try {
-        await new Promise(resolve => setTimeout(resolve, totalTime * 1000));
+        await new Promise(resolve => setTimeout(resolve, order.processTime * 1000));
         
         if (this.bots.includes(bot)) { // Check if bot still exists
           // Move to completed
