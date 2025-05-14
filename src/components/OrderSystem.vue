@@ -82,23 +82,55 @@ export default {
       }
       
       this.checkAndProcessOrders();
-    },
-    addBot() {
+    },    addBot() {
       const bot = {
         id: this.bots.length + 1,
-        isBusy: false
+        isBusy: false,
+        processingOrderId: null
       };
       this.bots.push(bot);
-      this.checkAndProcessOrders();
-    },
-    removeBot() {
+      
+      // Find next unprocessed order respecting VIP priority
+      const vipOrder = this.pendingOrders.find(
+        order => order.isVIP && !this.processingOrders.has(order.id)
+      );
+      const normalOrder = this.pendingOrders.find(
+        order => !order.isVIP && !this.processingOrders.has(order.id)
+      );
+      
+      // Process VIP order first if available, otherwise normal order
+      const nextOrder = vipOrder || normalOrder;
+      if (nextOrder) {
+        this.processOrder(bot, nextOrder);
+      }
+    },    removeBot() {
       if (this.bots.length > 0) {
         const removedBot = this.bots.pop();
-        // If bot was processing an order, return it to pending
-        this.checkProcessingOrders();
+        
+        // If bot was processing an order, handle it
+        if (removedBot.processingOrderId !== null) {
+          const orderId = removedBot.processingOrderId;
+          
+          // Clear timer for this specific order
+          clearInterval(this.processingOrdersTimers.get(orderId));
+          this.processingOrdersTimers.delete(orderId);
+          this.processingTimes.delete(orderId);
+          this.processingOrders.delete(orderId);
+          
+          // Reset bot status
+          removedBot.isBusy = false;
+          removedBot.processingOrderId = null;
+          
+          // Let other bots pick up pending orders
+          this.$nextTick(() => {
+            this.checkAndProcessOrders();
+          });
+        }
       }
-    },    async processOrder(bot, order) {
+    },async processOrder(bot, order) {
+      // Mark bot as busy and track which order it's processing
       bot.isBusy = true;
+      bot.processingOrderId = order.id;
       this.processingOrders.add(order.id);
       
       // Initialize processing time (10 seconds)
@@ -107,55 +139,71 @@ export default {
       
       // Set up countdown timer
       const timer = setInterval(() => {
+        if (!this.bots.includes(bot)) {
+          // Bot was removed, stop timer but keep order in pending
+          clearInterval(timer);
+          return;
+        }
+        
         const currentTime = this.processingTimes.get(order.id);
         if (currentTime > 0) {
           this.processingTimes.set(order.id, currentTime - 1);
+        } else if (currentTime === 0) {
+          clearInterval(timer);
         }
       }, 1000);
       
       this.processingOrdersTimers.set(order.id, timer);
-      
-      try {
+        try {
         await new Promise(resolve => setTimeout(resolve, totalTime * 1000));
         
         if (this.bots.includes(bot)) { // Check if bot still exists
+          // Move to completed
           this.completedOrders.push(order);
           this.pendingOrders = this.pendingOrders.filter(o => o.id !== order.id);
-        } else {
-          // Bot was removed, return order to pending
-          this.pendingOrders = this.pendingOrders.filter(o => o.id !== order.id);
-          this.pendingOrders.push(order);
-        }
-      } finally {
-        // Clean up timer
-        clearInterval(this.processingOrdersTimers.get(order.id));
-        this.processingOrdersTimers.delete(order.id);
-        this.processingTimes.delete(order.id);
-        this.processingOrders.delete(order.id);
-        
-        if (this.bots.includes(bot)) {
+          
+          // Clean up processing state
+          clearInterval(this.processingOrdersTimers.get(order.id));
+          this.processingOrdersTimers.delete(order.id);
+          this.processingTimes.delete(order.id);
+          this.processingOrders.delete(order.id);
+          
+          // Reset bot and process next order
           bot.isBusy = false;
+          bot.processingOrderId = null;
           this.checkAndProcessOrders();
         }
+      } catch (error) {
+        console.error('Error processing order:', error);
+      } finally {
+        if (!this.bots.includes(bot)) {
+          // Bot was removed, clean up timer only
+          clearInterval(this.processingOrdersTimers.get(order.id));
+          this.processingOrdersTimers.delete(order.id);
+        }
       }
-    },
-    checkAndProcessOrders() {
+    },    checkAndProcessOrders() {
       const availableBot = this.bots.find(bot => !bot.isBusy);
-      const pendingOrder = this.pendingOrders.find(
-        order => !this.processingOrders.has(order.id)
+      if (!availableBot) return;
+      
+      // Find next unprocessed order respecting VIP priority
+      const vipOrder = this.pendingOrders.find(
+        order => order.isVIP && !this.processingOrders.has(order.id)
+      );
+      const normalOrder = this.pendingOrders.find(
+        order => !order.isVIP && !this.processingOrders.has(order.id)
       );
       
-      if (availableBot && pendingOrder) {
-        this.processOrder(availableBot, pendingOrder);
+      // Process VIP order first if available, otherwise normal order
+      const nextOrder = vipOrder || normalOrder;
+      if (nextOrder) {
+        this.processOrder(availableBot, nextOrder);
       }
-    },
-    checkProcessingOrders() {
-      // Reset processing orders when bots are removed
-      this.processingOrders.clear();
-      this.bots.forEach(bot => {
-        bot.isBusy = false;
-      });
-      this.checkAndProcessOrders();
+    },sortPendingOrders() {
+      // Sort orders to maintain VIP and normal sequences
+      const vipOrders = this.pendingOrders.filter(o => o.isVIP);
+      const normalOrders = this.pendingOrders.filter(o => !o.isVIP);
+      this.pendingOrders = [...vipOrders, ...normalOrders];
     }
   }
 }
